@@ -1,0 +1,208 @@
+
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SW Finance</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#f2f5fa;color:#172b49;font-family:Arial,sans-serif}
+header{background:#142b4c;color:white;padding:26px 5%}
+h1{margin:0;font-size:30px}
+header p{margin:8px 0 0}
+main{max-width:1150px;margin:auto;padding:24px 16px}
+section,.stat{background:white;border-radius:16px;padding:20px;margin-bottom:18px;box-shadow:0 2px 12px #00000009}
+h2{font-size:21px;margin:0 0 16px}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.form{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+input,select,button{font:inherit;padding:12px;border:1px solid #d4ddeb;border-radius:9px;min-width:0}
+button{cursor:pointer;background:#2563c9;color:white;border:0}
+button:hover{filter:brightness(.94)}
+.secondary{background:#e7eef9;color:#17365d}
+.danger{background:#fff0f0;color:#b42336}
+.stat small{color:#66758b}
+.stat strong{display:block;font-size:25px;margin-top:10px}
+.positive{color:#087e4b}
+.negative{color:#bf263c}
+.toolbar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px}
+.toolbar>*{flex:1;min-width:150px}
+table{width:100%;border-collapse:collapse}
+td,th{padding:12px;text-align:right;border-bottom:1px solid #edf0f5}
+.tablewrap{overflow-x:auto}
+.actions{display:flex;gap:5px}
+.actions button{padding:7px}
+.note{font-size:13px;color:#66758b}
+.full{grid-column:1/-1}
+@media(max-width:700px){.grid,.form{grid-template-columns:1fr 1fr}}
+@media(max-width:450px){.grid,.form{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+<h1>SW Finance</h1>
+<p>הניהול הכספי שלי • בית ועסק</p>
+</header>
+<main>
+<div class="toolbar">
+<select id="filter" onchange="render()">
+<option value="all">תמונה כוללת</option>
+<option value="home">בית</option>
+<option value="business">עסק</option>
+</select>
+<input type="month" id="month" onchange="render()">
+<button onclick="backup()">גיבוי נתונים</button>
+<button class="secondary" onclick="document.getElementById('restore').click()">שחזור גיבוי</button>
+<input hidden type="file" id="restore" accept=".json" onchange="restoreData(event)">
+<button class="secondary" onclick="exportCSV()">ייצוא לאקסל</button>
+</div>
+<div class="grid">
+<div class="stat"><small>הכנסות</small><strong class="positive" id="income">₪0</strong></div>
+<div class="stat"><small>הוצאות</small><strong class="negative" id="expenses">₪0</strong></div>
+<div class="stat"><small>יתרה</small><strong id="balance">₪0</strong></div>
+<div class="stat"><small>הוצאות קבועות</small><strong id="fixedTotal">₪0</strong></div>
+</div>
+<section>
+<h2>הוספת הכנסה או הוצאה</h2>
+<form class="form" id="txForm">
+<select id="area"><option value="home">בית</option><option value="business">עסק</option></select>
+<select id="type"><option value="expense">הוצאה</option><option value="income">הכנסה</option></select>
+<input id="date" type="date" required>
+<input id="amount" type="number" min="0.01" step="0.01" placeholder="סכום בש״ח" required>
+<input id="category" placeholder="קטגוריה (מזון, משכורת...)" required>
+<input id="description" placeholder="תיאור (לא חובה)">
+<button class="full" type="submit">שמירת תנועה</button>
+</form>
+</section>
+<section>
+<h2>הוצאות קבועות והוראות קבע</h2>
+<p class="note">הוצאות פעילות נכללות בחישוב החודשי אוטומטית. אין כאן חיוב בנקאי בפועל.</p>
+<form class="form" id="fixedForm">
+<select id="fixedArea"><option value="home">בית</option><option value="business">עסק</option></select>
+<input id="fixedName" placeholder="שם ההוצאה (למשל אינטרנט)" required>
+<input id="fixedAmount" type="number" min="0.01" step="0.01" placeholder="סכום חודשי" required>
+<input id="fixedDay" type="number" min="1" max="31" placeholder="יום חיוב (1–31)" required>
+<input id="fixedStart" type="month" required>
+<input id="fixedEnd" type="month" placeholder="חודש סיום">
+<button class="full" type="submit">הוסף הוראת קבע</button>
+</form>
+<div class="tablewrap">
+<table><thead><tr><th>שם</th><th>תחום</th><th>סכום</th><th>יום</th><th>תקופה</th><th>פעולות</th></tr></thead>
+<tbody id="fixedRows"></tbody></table>
+</div>
+</section>
+<section>
+<h2>תנועות בחודש הנבחר</h2>
+<div class="tablewrap">
+<table><thead><tr><th>תאריך</th><th>תחום</th><th>סוג</th><th>קטגוריה</th><th>תיאור</th><th>סכום</th><th>פעולות</th></tr></thead>
+<tbody id="rows"></tbody></table>
+</div>
+</section>
+<p class="note">המידע נשמר בדפדפן במחשב זה. יש ליצור גיבוי JSON באופן קבוע. מעבר למחשב אחר לא מסנכרן נתונים אוטומטית.</p>
+</main>
+<script>
+const KEY="sw-finance-local-v1";
+const $=id=>document.getElementById(id);
+const money=n=>new Intl.NumberFormat("he-IL",{style:"currency",currency:"ILS"}).format(n||0);
+const today=new Date();
+const localDate=new Date(today.getTime()-today.getTimezoneOffset()*60000).toISOString().slice(0,10);
+$("date").value=localDate;
+$("month").value=localDate.slice(0,7);
+$("fixedStart").value=localDate.slice(0,7);
+let db={transactions:[],fixed:[]};
+try{
+const saved=JSON.parse(localStorage.getItem(KEY));
+if(saved&&Array.isArray(saved.transactions)&&Array.isArray(saved.fixed))db=saved;
+}catch(e){alert("לא ניתן לקרוא את הנתונים השמורים. יש לשחזר מגיבוי.");}
+function save(){localStorage.setItem(KEY,JSON.stringify(db));render()}
+function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+function areaName(v){return v==="home"?"בית":"עסק"}
+function active(f,m){return f.start<=m&&(!f.end||f.end>=m)}
+function matches(a){return $("filter").value==="all"||$("filter").value===a}
+function monthDay(m,d){
+const [y,mo]=m.split("-").map(Number);
+const last=new Date(y,mo,0).getDate();
+return m+"-"+String(Math.min(Number(d),last)).padStart(2,"0")
+}
+function render(){
+const m=$("month").value;
+const tx=db.transactions.filter(t=>t.date.slice(0,7)===m&&matches(t.area));
+const fx=db.fixed.filter(f=>active(f,m)&&matches(f.area));
+const income=tx.filter(t=>t.type==="income").reduce((s,t)=>s+Number(t.amount),0);
+const variable=tx.filter(t=>t.type==="expense").reduce((s,t)=>s+Number(t.amount),0);
+const fixed=fx.reduce((s,f)=>s+Number(f.amount),0);
+$("income").textContent=money(income);
+$("expenses").textContent=money(variable+fixed);
+$("fixedTotal").textContent=money(fixed);
+$("balance").textContent=money(income-variable-fixed);
+$("balance").className=income-variable-fixed>=0?"positive":"negative";
+const all=[
+...tx.map(t=>({...t,automatic:false})),
+...fx.map(f=>({id:f.id,date:monthDay(m,f.day),area:f.area,type:"expense",category:"הוצאה קבועה",description:f.name,amount:f.amount,automatic:true}))
+].sort((a,b)=>b.date.localeCompare(a.date));
+$("rows").innerHTML=all.map(t=>`<tr><td>${esc(t.date)}</td><td>${areaName(t.area)}</td><td>${t.type==="income"?"הכנסה":"הוצאה"}${t.automatic?" (קבועה)":""}</td><td>${esc(t.category)}</td><td>${esc(t.description)}</td><td>${money(t.amount)}</td><td>${t.automatic?"דרך הוראות קבע":`<div class="actions"><button class="secondary" onclick="editTx('${t.id}')">ערוך</button><button class="danger" onclick="deleteTx('${t.id}')">מחק</button></div>`}</td></tr>`).join("")||'<tr><td colspan="7">אין תנועות בחודש זה</td></tr>';
+$("fixedRows").innerHTML=db.fixed.filter(f=>matches(f.area)).map(f=>`<tr><td>${esc(f.name)}</td><td>${areaName(f.area)}</td><td>${money(f.amount)}</td><td>${f.day}</td><td>${f.start} עד ${f.end||"ללא הגבלה"}</td><td><div class="actions"><button class="secondary" onclick="editFixed('${f.id}')">ערוך</button><button class="danger" onclick="deleteFixed('${f.id}')">מחק</button></div></td></tr>`).join("")||'<tr><td colspan="6">אין הוראות קבע</td></tr>';
+}
+$("txForm").onsubmit=e=>{
+e.preventDefault();
+db.transactions.push({id:crypto.randomUUID(),area:$("area").value,type:$("type").value,date:$("date").value,amount:Number($("amount").value),category:$("category").value,description:$("description").value});
+$("amount").value="";$("category").value="";$("description").value="";
+save();
+};
+$("fixedForm").onsubmit=e=>{
+e.preventDefault();
+const start=$("fixedStart").value,end=$("fixedEnd").value;
+if(end&&end<start){alert("חודש הסיום חייב להיות אחרי חודש ההתחלה");return}
+db.fixed.push({id:crypto.randomUUID(),area:$("fixedArea").value,name:$("fixedName").value,amount:Number($("fixedAmount").value),day:Number($("fixedDay").value),start,end});
+$("fixedName").value="";$("fixedAmount").value="";$("fixedDay").value="";$("fixedEnd").value="";
+save();
+};
+function deleteTx(id){if(confirm("למחוק תנועה?")){db.transactions=db.transactions.filter(t=>t.id!==id);save()}}
+function deleteFixed(id){if(confirm("למחוק הוראת קבע?")){db.fixed=db.fixed.filter(f=>f.id!==id);save()}}
+function editTx(id){
+const t=db.transactions.find(x=>x.id===id);if(!t)return;
+const amount=prompt("סכום חדש",t.amount);if(amount===null)return;
+if(!(Number(amount)>0)){alert("סכום לא תקין");return}
+const category=prompt("קטגוריה",t.category);if(category===null)return;
+t.amount=Number(amount);t.category=category;save();
+}
+function editFixed(id){
+const f=db.fixed.find(x=>x.id===id);if(!f)return;
+const name=prompt("שם ההוצאה",f.name);if(name===null)return;
+const amount=prompt("סכום חודשי",f.amount);if(amount===null)return;
+if(!(Number(amount)>0)){alert("סכום לא תקין");return}
+const end=prompt("חודש סיום (YYYY-MM), או ריק ללא הגבלה",f.end||"");
+if(end===null)return;
+if(end&&(!/^\d{4}-(0[1-9]|1[0-2])$/.test(end)||end<f.start)){alert("חודש סיום לא תקין");return}
+f.name=name;f.amount=Number(amount);f.end=end;save();
+}
+function download(name,content,type){
+const blob=new Blob([content],{type});
+const url=URL.createObjectURL(blob);
+const a=document.createElement("a");a.href=url;a.download=name;a.click();
+setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+function backup(){download("SW-Finance-backup-"+localDate+".json",JSON.stringify(db,null,2),"application/json")}
+function restoreData(e){
+const file=e.target.files[0];if(!file)return;
+const reader=new FileReader();
+reader.onload=()=>{
+try{
+const data=JSON.parse(reader.result);
+if(!Array.isArray(data.transactions)||!Array.isArray(data.fixed))throw Error();
+if(confirm("השחזור יחליף את כל הנתונים הנוכחיים. להמשיך?")){db=data;save()}
+}catch(err){alert("קובץ הגיבוי אינו תקין")}
+e.target.value="";
+};
+reader.readAsText(file);
+}
+function exportCSV(){
+const lines=[["תאריך","תחום","סוג","קטגוריה","תיאור","סכום"]];
+db.transactions.forEach(t=>lines.push([t.date,areaName(t.area),t.type==="income"?"הכנסה":"הוצאה",t.category,t.description,t.amount]));
+const csv="\uFEFF"+lines.map(r=>r.map(v=>'"'+String(v??"").replace(/"/g,'""')+'"').join(",")).join("\r\n");
+download("SW-Finance.csv",csv,"text/csv;charset=utf-8");
+}
+render();
+</script>
+</body>
+</html>
